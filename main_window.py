@@ -87,7 +87,49 @@ class MainWindow:
     # ------------------------------------------------------------------
     # Utilities
     def _await_if_needed(self, value: Any) -> Any:
-        return value
+        """Return ``value`` awaiting it when necessary.
+
+        The production GUI occasionally receives coroutine objects from
+        asynchronous sentiment analysers.  The lightweight test double used in
+        this repository mimics that behaviour so we need to transparently await
+        the value while still working in purely synchronous environments.  The
+        implementation below mirrors the defensive approach from the original
+        project: ``asyncio.run`` is used when possible and we gracefully fall
+        back to existing event loops when one is already running.
+        """
+
+        import asyncio
+        import inspect
+
+        if not inspect.isawaitable(value):
+            return value
+
+        try:
+            return asyncio.run(value)
+        except RuntimeError:
+            # ``asyncio.run`` fails when an event loop is already running.  In
+            # that situation we re-use the current loop; if it is running in a
+            # different thread ``run_coroutine_threadsafe`` gives us a blocking
+            # future that we can wait on.
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is None:
+                # No loop is available, create a temporary one.
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(value)
+                finally:
+                    loop.close()
+
+            if loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(value, loop)
+                return future.result()
+
+            return loop.run_until_complete(value)
 
     def _add_log(self, level: str, message: str) -> None:
         self._log_history.append((level, message))
