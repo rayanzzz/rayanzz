@@ -1,6 +1,8 @@
 """Simplified trading UI logic with sentiment analysis helpers."""
 from __future__ import annotations
 
+import asyncio
+import inspect
 from typing import Any, Dict, Optional
 
 
@@ -87,6 +89,23 @@ class MainWindow:
     # ------------------------------------------------------------------
     # Utilities
     def _await_if_needed(self, value: Any) -> Any:
+        """Return the resolved value for awaitables used in tests.
+
+        The production GUI accepts both synchronous and asynchronous helpers for
+        fetching sentiment data.  The trimmed test double mirrors this by
+        eagerly running ``async`` coroutines so that callers receive the final
+        dictionary and can exercise the formatting logic without needing an
+        event loop in the tests.
+        """
+
+        if inspect.isawaitable(value):
+            # ``asyncio.run`` expects a coroutine object.  When a Future/Task is
+            # passed in ``inspect.isawaitable`` still returns True, therefore we
+            # wrap it so the helper works for both raw coroutines and futures.
+            async def _consume(awaitable: Any) -> Any:
+                return await awaitable
+
+            return asyncio.run(_consume(value))
         return value
 
     def _add_log(self, level: str, message: str) -> None:
